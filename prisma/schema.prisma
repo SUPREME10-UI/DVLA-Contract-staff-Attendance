@@ -1,0 +1,216 @@
+// Prisma schema for Contract Staff Attendance Management System
+// Target: MySQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  INACTIVE
+  TERMINATED
+  ON_LEAVE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  EARLY
+  ABSENT
+  ON_LEAVE
+  HALF_DAY
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  CASUAL
+  MATERNITY
+  BEREAVEMENT
+  STUDY
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String   @default("Driver and Vehicle Licensing Authority (DVLA)")
+  code        String   @default("DVLA-GH")
+  country     String   @default("Ghana")
+  address     String   @default("1 Jawahar Lal Nehru Road, Cantonments, Accra") @db.Text
+  email       String   @default("info@dvla.gov.gh")
+  phone       String   @default("+233 30 274 6760")
+  logoUrl     String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  settings    AttendanceSettings?
+}
+
+model AttendanceSettings {
+  id                String       @id @default(uuid())
+  organizationId    String       @unique
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workStartTime     String       @default("08:00") // 24-hr format
+  workEndTime       String       @default("17:00")
+  lateGraceMinutes  Int          @default(15) // Late after 08:15
+  halfDayHours      Float        @default(4.0)
+  requireLocation   Boolean      @default(false)
+  allowOvertime     Boolean      @default(true)
+  updatedAt         DateTime     @updatedAt
+}
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  passwordHash String
+  name         String
+  role         Role         @default(STAFF)
+  phone        String?
+  avatar       String?      @db.MediumText
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  contractStaff ContractStaff?
+  auditLogs     AuditLog[]
+  notifications Notification[]
+}
+
+model Department {
+  id          String          @id @default(uuid())
+  name        String          @unique
+  code        String          @unique
+  description String?         @db.Text
+  createdAt   DateTime        @default(now())
+  staff       ContractStaff[]
+}
+
+model ContractStaff {
+  id                  String           @id @default(uuid())
+  staffId             String           @unique // e.g. DVLA-CS-001
+  userId              String           @unique
+  user                User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName            String
+  ghanaCard           String           @unique // e.g. GHA-723491823-4
+  phone               String
+  email               String           @unique
+  gender              Gender           @default(MALE)
+  dob                 DateTime?
+  address             String?          @db.Text
+  departmentId        String
+  department          Department       @relation(fields: [departmentId], references: [id])
+  position            String
+  contractStart       DateTime
+  contractEnd         DateTime
+  status              EmploymentStatus @default(ACTIVE)
+  avatar              String?          @db.MediumText
+  biometricData       String?          @db.LongText
+  biometricCapturedAt DateTime?
+  faceFeatures        String?          @db.LongText
+  isNewRegistration   Boolean          @default(false)
+  emergencyContact    String?
+  emergencyPhone      String?
+  registrationNotes   String?          @db.Text
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  attendances         Attendance[]
+  leaveRequests       LeaveRequest[]
+
+  @@index([staffId])
+  @@index([departmentId])
+  @@index([status])
+}
+
+model Attendance {
+  id                String           @id @default(uuid())
+  staffId           String
+  staff             ContractStaff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  date              String           // YYYY-MM-DD for indexing and daily uniqueness
+  checkInTime       String?          // HH:mm:ss or ISO
+  checkOutTime      String?          // HH:mm:ss or ISO
+  workingMinutes    Int              @default(0)
+  status            AttendanceStatus @default(PRESENT)
+  checkInLocation   String?
+  checkOutLocation  String?
+  biometricVerified Boolean          @default(true)
+  biometricPhoto    String?          @db.LongText
+  isCorrected       Boolean          @default(false)
+  correctedBy       String?
+  correctionReason  String?          @db.Text
+  notes             String?          @db.Text
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@unique([staffId, date])
+  @@index([date])
+  @@index([status])
+}
+
+model LeaveRequest {
+  id              String        @id @default(uuid())
+  staffId         String
+  staff           ContractStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  leaveType       LeaveType     @default(ANNUAL)
+  startDate       String        // YYYY-MM-DD
+  endDate         String        // YYYY-MM-DD
+  reason          String        @db.Text
+  status          LeaveStatus   @default(PENDING)
+  approvedBy      String?
+  rejectionReason String?       @db.Text
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([staffId])
+  @@index([status])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String   @db.Text
+  type      String   @default("INFO") // INFO, SUCCESS, WARNING, ALERT
+  isRead    Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName    String
+  userRole    String
+  action      String   // e.g. "STAFF_CREATED", "ATTENDANCE_CORRECTED"
+  description String   @db.Text
+  ipAddress   String   @default("127.0.0.1")
+  createdAt   DateTime @default(now())
+
+  @@index([action])
+  @@index([createdAt])
+}
